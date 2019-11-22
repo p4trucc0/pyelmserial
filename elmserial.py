@@ -4,6 +4,7 @@ import math
 import serial
 import time
 import datetime
+from elmserial_support import *
 
 # Andrea Patrucco, 16/11/2019
 # Library to access the ELM327 usb - serial "dongle"
@@ -20,7 +21,7 @@ DATETIME_FILES_FORMAT = r"%Y_%m_%d_%H_%M_%S"
 class Elm327:
 	def __init__(self, comport = DEFAULT_PORT, baudrate = DEFAULT_BAUDRATE, \
 		terminator = DEFAULT_TERMINATOR, timeout = DEFAULT_TIMEOUT, log_file = None, \
-		auto_open_serial = False, poll_list = list()):
+		auto_open_serial = False, poll_list = list(), header_mode = False):
 		self.comport = comport
 		self.baudrate = baudrate
 		self.terminator = terminator
@@ -34,6 +35,7 @@ class Elm327:
 		self.add_log("INIT", "Serial port set to " + self.comport)
 		self.add_log("INIT", "Baudrate set to " + str(self.baudrate))
 		self.poll_list = poll_list
+		self.header_mode = header_mode
 		self.serial = None
 		if self.auto_open_serial:
 			self.open()
@@ -94,14 +96,21 @@ class Elm327:
 		pass
 
 	# Pass to the ELM327 initial commands.
-	# TODO: add formatting options (correct parsing depends upon them)
 	# TODO: add checks to determine whether initialization failed.
+	# TODO: check enable_headers is working
 	def initialize(self):
 		if not self.serial is None:
 			self.write("ATZ")
 			msgo = self.read_until_char()
 			self.write("ATSP0")
 			msgo = self.read_until_char()
+			enable_headers = self.header_mode
+			if enable_headers:
+				self.write("ATH1")
+				msgo = self.read_until_char()
+			else:
+				self.write("ATH0")
+				msgo = self.read_until_char()
 			self.add_log("ELM_INIT", "Device initialized with ATZ - ATSP0 sequence.")
 		else:
 			self.add_log("ELM_INIT", "Error: could not initialize ELM327: serial does not exist.")
@@ -111,7 +120,7 @@ class Elm327:
 		hex_id = hex(idn)[2:].upper()
 		if len(hex_id) < 2:
 			hex_id = '0' + hex_id
-		str2send = "01" + hex_id
+		str2send = "01" + hex_id + "1"
 		self.add_log("POLL_MNG", "Polling id " + str(idn) + ".")
 		self.write(str2send)
 		out = self.read_until_char()
@@ -122,7 +131,8 @@ class Elm327:
 
 	def parse_out(self, msg, idn):
 		try:
-			dct_prs = ob2_parser_v0(msg, idn)
+			dct_prs = ob2_parser_v0(msg, idn, long_format = self.header_mode)
+			#dct_prs = obd_parser(msg, idn)
 			str2log = "Msg Id: " + str(dct_prs['IdR']) + " (" + \
 				dct_prs['Descr'] + ") - Value = " + str(dct_prs['Val'])
 			self.add_log("PARSER", str2log)
@@ -148,7 +158,6 @@ class Elm327:
 
 def ob2_parser_v0(msg, idx, sp = "\r", long_format = True):
 	out = dict()
-	# Split message removing returns.
 	msgs = msg.split(sp)
 	ms = msgs[1]
 	print(ms)
@@ -215,13 +224,13 @@ def ob2_parser_v0(msg, idx, sp = "\r", long_format = True):
 		out['Val'] = msi[2] * 100 / 255
 	return out
 
-def hexstr2list(hexstr):
-	hs = hexstr.split(' ')
-	out = list()
-	for h in hs:
-		if len(h) > 1:
-			out.append(int(h, 16))
-	return out
+# def hexstr2list(hexstr):
+# 	hs = hexstr.split(' ')
+# 	out = list()
+# 	for h in hs:
+# 		if len(h) > 1:
+# 			out.append(int(h, 16))
+# 	return out
 
 def bv2int(bv):
 	N = len(bv)
